@@ -89,6 +89,8 @@ class Creature(Card):
         self.draw = card.draw
 
     def strike(self, opponent_creature):
+        global result_str
+
         __self_striked = False
         __opponent_creature_striked = False
 
@@ -119,6 +121,16 @@ class Creature(Card):
 
         if self.has_ability('D') and __opponent_creature_striked:
             me.health += self.attack
+
+        result_str += 'ATTACK {} {};'.format(self.cid, opponent_creature.cid)
+
+
+    def strike_to_face(self):
+        global result_str
+
+        opponent.health -= self.attack
+
+        result_str += 'ATTACK {} -1;'.format(self.cid)
 
     def summon(self):
         global result_str
@@ -153,7 +165,7 @@ class GreenItem(Card):
 
         for index, ability in enumerate(self.abilities):
             if ability != '-':
-                target_creature.abilities[index] = ability
+                target_creature.abilities = target_creature.abilities[:index] + ability + target_creature.abilities[index + 1:]
 
         me.health += self.health_change
 
@@ -183,9 +195,9 @@ class RedItem(Card):
         target_creature.attack += self.attack
         target_creature.health += self.health
 
-        for index, ability in enumerate(self.abilities):
+        for _, ability in enumerate(self.abilities):
             if ability != '-':
-                target_creature.abilities[index] = '-'
+                target_creature.abilities.replace(ability, '-')
 
         opponent.health += self.opponent_health_change
 
@@ -208,6 +220,8 @@ class BlueItem(Card):
         self.draw = card.draw
 
     def use_to_creature(self, target_creature):
+        global result_str
+
         me.mana -= self.cost
 
         target_creature.health += self.health
@@ -215,13 +229,19 @@ class BlueItem(Card):
         me.health += self.health_change
         opponent.health += self.opponent_health_change
 
+        result_str += 'USE {} {};'.format(self.cid, target_creature.cid)
+
     def use_to_face(self):
+        global result_str
+
         me.mana -= self.cost
 
         me.health += self.health_change
         opponent.health += self.opponent_health_change
 
         opponent.health += self.health
+
+        result_str += 'USE {} -1;'.format(self.cid)
 
 
 locations = {
@@ -268,33 +288,69 @@ def filter_by_type(cards):
 
 
 def get_impact(card):
-    impact = card.attack + card.health
-    if card.has_ability('B'):
-        impact += BREAKTHROUGH_IMPACT
-    if card.has_ability('C'):
-        impact += CHARGE_IMPACT
-    if card.has_ability('G'):
-        impact += GUARD_IMPACT
-    if card.has_ability('D'):
-        impact += DRAIN_IMPACT
-    if card.has_ability('L'):
-        impact += LETHAL_IMPACT
-    if card.has_ability('W'):
-        impact += WARD_IMPACT
+    if card.ctype == CardType.CREATURE:
 
-    impact += card.health_change / 2
-    impact -= card.opponent_health_change / 2
+        impact = card.attack + card.health
+        if card.has_ability('B'):
+            impact += BREAKTHROUGH_IMPACT
+        if card.has_ability('C'):
+            impact += CHARGE_IMPACT
+        if card.has_ability('G'):
+            impact += GUARD_IMPACT
+        if card.has_ability('D'):
+            impact += DRAIN_IMPACT
+        if card.has_ability('L'):
+            impact += LETHAL_IMPACT
+        if card.has_ability('W'):
+            impact += WARD_IMPACT
 
-    impact += card.draw
+        impact += card.health_change / 2
+        impact -= card.opponent_health_change / 2
 
-    if card.attack * 3 < card.health:
-        impact -= 1
+        impact += card.draw
 
-    if card.health * 2 < card.attack:
-        impact -= 1
+        if card.attack * 3 < card.health:
+            impact -= 2
 
-    return impact / (card.cost + 1)
+        if card.health * 2 < card.attack:
+            impact -= 2
 
+        return impact / (card.cost + 1)
+
+    elif card.ctype == CardType.GREEN_ITEM:
+        impact = card.attack + card.health
+        if card.has_ability('B'):
+            impact += BREAKTHROUGH_IMPACT
+        if card.has_ability('C'):
+            impact += CHARGE_IMPACT
+        if card.has_ability('G'):
+            impact += GUARD_IMPACT
+        if card.has_ability('D'):
+            impact += DRAIN_IMPACT
+        if card.has_ability('L'):
+            impact += LETHAL_IMPACT
+        if card.has_ability('W'):
+            impact += WARD_IMPACT
+
+        return impact / (card.cost + 1)
+
+    elif card.ctype == CardType.RED_ITEM:
+        impact = (-card.attack) + (-card.health)
+
+        if card.abilities != '------':
+            impact += 2
+
+        impact += -card.opponent_health_change
+
+        return impact / (card.cost + 1)
+
+    else:
+        impact = -card.health
+
+        impact += card.health_change
+        impact += -card.opponent_health_change
+
+        return impact / (card.cost + 1)
 
 def filter_card_by_can_played(cards, current_mana):
     return [card for card in cards if card.cost <= current_mana]
@@ -306,6 +362,59 @@ def possible_success_attack(my_card, opponent_card):
     if my_card.attack >= opponent_card.health and my_card.health > opponent_card.attack:
         return True
     return False
+
+
+def get_best_target(creature, opponent_creatures, opponent_guards, my_guards):
+
+    if creature.has_ability('L'):
+        if len(opponent_guards) > 0:
+            opponent_guards.sort(key=attrgetter('cost'), reverse=True)
+            for opponent_guard in opponent_guards:
+                if not opponent_guard.has_ability('W'):
+                    return opponent_guard
+
+            return None
+
+        opponent_creatures.sort(key=attrgetter('cost'), reverse=True)
+        for opponent_creature in opponent_creatures:
+            if not opponent_creature.has_ability('W') and creature.cost <= opponent_creature.cost:
+                return opponent_creature
+
+        return None
+
+    # ELSE
+
+    if sum([creature.health for creature in my_guards]) > sum([creature.attack for creature in opponent_creatures]) and \
+        len(opponent_guards) == 0:
+
+        return -1
+
+    opponent_guards.sort(key=attrgetter('cost'))
+    opponent_creatures.sort(key=attrgetter('cost'))
+    for opponent_guard in opponent_guards:
+        if possible_success_attack(creature, opponent_guard):
+            return opponent_guard
+
+    if len(opponent_guards) == 0:
+        for opponent_creature in opponent_creatures:
+            if possible_success_attack(creature, opponent_creature):
+                return opponent_creature
+
+        return -1
+
+    for opponent_guard in opponent_guards:
+        if (creature.health > opponent_guard.attack or creature.has_ability('W')) and not creature.has_ability('G'):
+            return opponent_guard
+
+    if len(opponent_guards) == 0:
+        for opponent_creature in opponent_creatures:
+            if (creature.health > opponent_creature.attack or creature.has_ability('W')) and not creature.has_ability('G'):
+                return opponent_creature
+
+        return -1
+    return None
+
+
 
 # GLOBAL VARIABLES
 
@@ -416,7 +525,6 @@ while True:
                 red_items_in_hand.remove(silence_items[0])
 
 
-
     # USE GREEN ITEMS ON MY CREATURES
 
     if len(green_items_in_hand) > 0:
@@ -442,8 +550,79 @@ while True:
     for creature in creatures_in_hand:
         if creature.can_summon():
             creature.summon()
+            if creature.has_ability('G'):
+                my_guards.append(creature)
+            if creature.has_ability('C'):
+                my_creatures.append(creature)
+
+    # IF WE HAVE MANA > 0
+
+    if me.mana > 0:
+
+        if len(blue_items_in_hand) > 0:
+            for item in blue_items_in_hand:
+                if item.can_use():
+                    item.use_to_face()
+                    blue_items_in_hand.remove(item)
+
+        if len(green_items_in_hand) > 0:
+            for item in green_items_in_hand:
+                if item.can_use() and len(my_creatures) > 0:
+                    item.use(random.choice(my_creatures))
+                    green_items_in_hand.remove(item)
+
+        if len(red_items_in_hand) > 0:
+            for item in red_items_in_hand:
+                if item.ID in SILENCE_ITEMS:
+                    continue
+                if item.can_use() and len(opponent_creatures) > 0:
+                    opponent_creature = random.choice(opponent_creatures)
+                    item.use(opponent_creature)
+                    red_items_in_hand.remove(item)
+
+                    if opponent_creature.health <= 0:
+                        opponent_creatures.remove(opponent_creature)
+
+                        if opponent_creature in opponent_guards:
+                            opponent_guards.remove(opponent_creature)
 
 
+
+    # ATTACK
+
+
+    for _ in range(6):
+        for my_creature in my_creatures:
+
+            if len(opponent_guards) == 0 and sum([creature.attack for creature in my_creatures]) >= opponent.health:
+                for creature in my_creatures:
+                    creature.strike_to_face()
+                break
+
+
+            target = get_best_target(my_creature, opponent_creatures, opponent_guards, my_guards)
+
+            if target == -1:
+                my_creature.strike_to_face()
+                my_creatures.remove(my_creature)
+
+            elif target != None:
+                my_creature.strike(target)
+
+                my_creatures.remove(my_creature)
+                if target.health <= 0:
+                    opponent_creatures.remove(target)
+
+                    if target in opponent_guards:
+                        opponent_guards.remove(target)
+
+                if my_creature.health <= 0 and my_creature in my_guards:
+                    my_guards.remove(my_creature)
+
+            continue
+
+    for my_creature in my_creatures:
+        my_creature.strike_to_face()
 
     if result_str != "":
         print(result_str)
