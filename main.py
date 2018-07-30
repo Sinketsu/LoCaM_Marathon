@@ -416,6 +416,7 @@ while True:
                 red_items_in_hand.remove(silence_items[0])
 
 
+
     # USE GREEN ITEMS ON MY CREATURES
 
     if len(green_items_in_hand) > 0:
