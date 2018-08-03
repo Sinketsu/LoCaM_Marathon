@@ -352,15 +352,37 @@ def get_impact(card):
 
         return impact / (card.cost + 1)
 
+
 def filter_card_by_can_played(cards, current_mana):
     return [card for card in cards if card.cost <= current_mana]
 
 
 def possible_success_attack(my_card, opponent_card):
-    if my_card.attack >= opponent_card.health and my_card.health < opponent_card.attack and my_card.attack < opponent_card.attack:
-        return True
-    if my_card.attack >= opponent_card.health and my_card.health > opponent_card.attack:
-        return True
+    if my_card.has_ability('W'):
+        if my_card.attack >= opponent_card.health and not opponent_card.has_ability('W'):
+            return True
+        elif opponent_card.has_ability('W') and get_impact(my_card) < get_impact(opponent_card):
+            return True
+        else:
+            return False
+    else:
+        if my_card.attack <= 2 and opponent_card.has_ability('W'):
+            return True
+        if my_card.attack >= opponent_card.health and my_card.health > opponent_card.attack and \
+                not opponent_card.has_ability('W'):
+
+            return True
+
+        if my_card.attack >= opponent_card.health and my_card.health == opponent_card.attack and \
+                not opponent_card.has_ability('W') and my_card.attack < opponent_card.attack:
+
+            return True
+
+        if my_card.attack >= opponent_card.health and my_card.health < opponent_card.attack and \
+                not opponent_card.has_ability('W'):
+
+            return True
+
     return False
 
 
@@ -389,8 +411,14 @@ def get_best_target(creature, opponent_creatures, opponent_guards, my_guards):
 
         return -1
 
-    opponent_guards.sort(key=attrgetter('cost'))
-    opponent_creatures.sort(key=attrgetter('cost'))
+    opponent_guards.sort(key=attrgetter('cost'), reverse=True)
+    opponent_creatures.sort(key=attrgetter('cost'), reverse=True)
+
+    if creature.health == 1 and creature.attack >= 3:
+        if len(opponent_guards) > 0:
+            return opponent_guards[0]
+        return -1
+
     for opponent_guard in opponent_guards:
         if possible_success_attack(creature, opponent_guard):
             return opponent_guard
@@ -524,6 +552,17 @@ while True:
                 opponent_guards.remove(opponent_guards[0])
                 red_items_in_hand.remove(silence_items[0])
 
+        removal_items = [item for item in red_items_in_hand if item.ID == REMOVAL]
+        if len(removal_items) > 0:
+            opponent_guards.sort(key=get_impact, reverse=True)
+            if removal_items[0].can_use() and opponent_guards[0].cost > 6:
+                removal_items[0].use(opponent_guards[0])
+
+                opponent_creatures.remove(opponent_guards[0])
+                opponent_guards.remove(opponent_guards[0])
+
+                red_items_in_hand.remove(removal_items[0])
+
 
     # USE GREEN ITEMS ON MY CREATURES
 
@@ -546,8 +585,21 @@ while True:
 
     # TRY SUMMON
 
+    quad_cost = -1
+    cards_to_summon = []
+
     creatures_in_hand.sort(key=attrgetter('cost'), reverse=True)
-    for creature in creatures_in_hand:
+    for i in range(len(creatures_in_hand)):
+        for cards in itertools.combinations(creatures_in_hand, i):
+            if sum([card.cost for card in cards]) > me.mana:
+                continue
+
+            current_quad_cost = sum([card.cost ** 2 for card in cards])
+            if current_quad_cost > quad_cost:
+                quad_cost = current_quad_cost
+                cards_to_summon = cards
+
+    for creature in cards_to_summon:
         if creature.can_summon():
             creature.summon()
             if creature.has_ability('G'):
